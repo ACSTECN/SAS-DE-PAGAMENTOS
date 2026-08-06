@@ -1,8 +1,9 @@
 /**
- * Vercel deploy entry handler, for serverless deployment, please don't modify this file
+ * Local development entry mirror (kept for reference)
+ * The real Vercel deploy entry is now at /api/index.ts at project root.
  */
+import app from './app.js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import app from '../_api/app.js';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   return app(req, res);
