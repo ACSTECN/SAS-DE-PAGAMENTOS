@@ -2,38 +2,43 @@ import { Router, type Response } from 'express';
 import { ApiError, asyncHandler } from '../lib/api-error.js';
 import { requireAuth, type AuthenticatedRequest } from '../lib/auth.js';
 import { decryptSensitiveValue, encryptSensitiveValue } from '../lib/crypto.js';
-import {
-  resolveInterEnvironmentUrls,
-  type InterRuntimeEnvironment,
-} from '../lib/env.js';
 import { supabaseAdmin } from '../lib/supabase.js';
-import { requestInterToken } from '../services/inter.js';
+import { validateAsaasConnection } from '../services/asaas.js';
 
 const router = Router();
 
-async function loadConnection(companyId: string) {
+type AsaasConnectionRow = {
+  id: string;
+  bank_code: 'asaas';
+  display_name: string;
+  environment: 'sandbox' | 'production';
+  status: 'pending' | 'validated' | 'error';
+  last_tested_at: string | null;
+  validation_message: string | null;
+  api_key_encrypted?: string | null;
+  client_secret_encrypted?: string | null;
+};
+
+function toEnvironmentLabel(environment: 'sandbox' | 'production') {
+  return environment === 'production' ? 'produção' : 'sandbox';
+}
+
+async function loadAsaasConnection(companyId: string) {
   const { data, error } = await supabaseAdmin
     .from('bank_connections')
     .select('*')
     .eq('company_id', companyId)
-    .eq('bank_code', 'inter')
+    .eq('bank_code', 'asaas')
     .maybeSingle();
 
-  if (error) {
-    throw new ApiError(500, 'Falha ao carregar conexão bancária.');
-  }
-
-  return data;
+  if (error) throw new ApiError(500, 'Falha ao carregar conexão com Asaas.');
+  return data as unknown as AsaasConnectionRow | null;
 }
 
-function toEnvironmentLabel(environment: InterRuntimeEnvironment) {
-  return environment === 'production' ? 'produção' : 'sandbox';
-}
-
-async function markConnectionStatus(
+async function markAsaasStatus(
   connectionId: string,
   status: 'validated' | 'error',
-  message?: string,
+  message?: string | null,
 ) {
   await supabaseAdmin
     .from('bank_connections')
@@ -46,55 +51,32 @@ async function markConnectionStatus(
     .eq('id', connectionId);
 }
 
-async function validateConnection(connection: {
-  id: string;
-  client_id: string;
-  client_secret_encrypted: string;
-  certificate_encrypted: string;
-  private_key_encrypted: string;
-  token_url: string;
-  payment_url: string;
-}) {
-  try {
-    await requestInterToken({
-      clientId: connection.client_id,
-      clientSecret: decryptSensitiveValue(connection.client_secret_encrypted),
-      certificate: decryptSensitiveValue(connection.certificate_encrypted),
-      privateKey: decryptSensitiveValue(connection.private_key_encrypted),
-      tokenUrl: connection.token_url,
-      paymentUrl: connection.payment_url,
-    });
-
-    await markConnectionStatus(connection.id, 'validated', 'Conexão validada com sucesso.');
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Falha ao validar a conexão do Banco Inter.';
-
-    await markConnectionStatus(connection.id, 'error', message);
-    throw error;
-  }
+function getAsaasApiKey(conn: AsaasConnectionRow): string {
+  if (conn.api_key_encrypted) return decryptSensitiveValue(conn.api_key_encrypted);
+  if (conn.client_secret_encrypted) return decryptSensitiveValue(conn.client_secret_encrypted);
+  throw new ApiError(400, 'API Key da Asaas não foi configurada para esta empresa.');
 }
 
 router.get(
-  '/inter',
+  '/',
   requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const connection = await loadConnection(req.currentUser!.companyId);
+    const connection = await loadAsaasConnection(req.currentUser!.companyId);
 
     res.json({
       success: true,
+      provider: 'asaas',
       connection: connection
         ? {
             id: connection.id,
             displayName: connection.display_name,
-            clientId: connection.client_id,
             environment: connection.environment,
             status: connection.status,
             lastTestedAt: connection.last_tested_at,
             validationMessage: connection.validation_message,
-            hasSecret: true,
-            hasCertificate: true,
-            hasPrivateKey: true,
+            hasApiKey: Boolean(
+              connection.api_key_encrypted || connection.client_secret_encrypted,
+            ),
           }
         : null,
     });
@@ -102,32 +84,33 @@ router.get(
 );
 
 router.post(
-  '/inter',
+  '/',
   requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { clientId, clientSecret, certificate, privateKey, environment } =
-      req.body ?? {};
-    const selectedEnvironment =
+    const { apiKey, environment } = req.body ?? {};
+    const selectedEnvironment: 'sandbox' | 'production' =
       environment === 'production' ? 'production' : 'sandbox';
 
-    if (!clientId || !clientSecret || !certificate || !privateKey) {
-      throw new ApiError(400, 'Preencha Client ID, Client Secret, certificado PEM e chave privada PEM.');
+    if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length < 10) {
+      throw new ApiError(400, 'Informe uma API Key válida do Asaas.');
     }
 
-    const urls = resolveInterEnvironmentUrls(selectedEnvironment);
+    const trimmedKey = apiKey.trim();
+    const encryptedApiKey = encryptSensitiveValue(trimmedKey);
 
     const payload = {
       company_id: req.currentUser!.companyId,
-      bank_code: 'inter',
-      display_name: 'Conta Banco Inter principal',
+      bank_code: 'asaas' as const,
+      display_name: 'Conta Asaas principal',
       environment: selectedEnvironment,
-      client_id: clientId,
-      client_secret_encrypted: encryptSensitiveValue(clientSecret),
-      certificate_encrypted: encryptSensitiveValue(certificate),
-      private_key_encrypted: encryptSensitiveValue(privateKey),
-      token_url: urls.tokenUrl,
-      payment_url: urls.paymentUrl,
-      status: 'pending',
+      client_id: 'asaas',
+      client_secret_encrypted: encryptedApiKey,
+      certificate_encrypted: encryptSensitiveValue('na'),
+      private_key_encrypted: encryptSensitiveValue('na'),
+      token_url: `https://${selectedEnvironment === 'production' ? 'www' : 'sandbox'}.asaas.com/api/v3/transfers`,
+      payment_url: `https://${selectedEnvironment === 'production' ? 'www' : 'sandbox'}.asaas.com/api/v3/transfers`,
+      api_key_encrypted: encryptedApiKey,
+      status: 'pending' as const,
       validation_message: null,
       updated_at: new Date().toISOString(),
     };
@@ -136,40 +119,81 @@ router.post(
       onConflict: 'company_id,bank_code',
     });
 
-    if (error) {
-      throw new ApiError(400, error.message || 'Falha ao salvar conexão bancária.');
+    if (error) throw new ApiError(400, error.message || 'Falha ao salvar conexão Asaas.');
+
+    const saved = await loadAsaasConnection(req.currentUser!.companyId);
+    if (!saved) throw new ApiError(500, 'Falha ao recarregar conexão Asaas após salvar.');
+
+    try {
+      await validateAsaasConnection({
+        apiKey: getAsaasApiKey(saved),
+        environment: selectedEnvironment,
+      });
+      await markAsaasStatus(saved.id, 'validated', 'Conexão Asaas validada com sucesso.');
+    } catch (validationError) {
+      const message =
+        validationError instanceof Error
+          ? validationError.message
+          : 'Falha ao validar conexão Asaas.';
+      await markAsaasStatus(saved.id, 'error', message);
+      throw new ApiError(400, message);
     }
-
-    const savedConnection = await loadConnection(req.currentUser!.companyId);
-
-    if (!savedConnection) {
-      throw new ApiError(500, 'Falha ao recarregar a conexão do Banco Inter após salvar.');
-    }
-
-    await validateConnection(savedConnection);
 
     res.json({
       success: true,
-      message: `Banco Inter conectado com sucesso no ambiente de ${toEnvironmentLabel(selectedEnvironment)}.`,
+      message: `Asaas conectado com sucesso no ambiente de ${toEnvironmentLabel(selectedEnvironment)}.`,
+      environment: selectedEnvironment,
     });
   }),
 );
 
 router.post(
-  '/inter/test',
+  '/test',
   requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const connection = await loadConnection(req.currentUser!.companyId);
+    const connection = await loadAsaasConnection(req.currentUser!.companyId);
+    if (!connection) throw new ApiError(404, 'Configure a conexão Asaas antes de testar.');
 
-    if (!connection) {
-      throw new ApiError(404, 'Configure a conexão bancária antes de testar.');
+    try {
+      await validateAsaasConnection({
+        apiKey: getAsaasApiKey(connection),
+        environment: connection.environment,
+      });
+      await markAsaasStatus(connection.id, 'validated', 'Conexão validada com sucesso.');
+    } catch (validationError) {
+      const message =
+        validationError instanceof Error
+          ? validationError.message
+          : 'Falha ao validar Asaas.';
+      await markAsaasStatus(connection.id, 'error', message);
+      throw new ApiError(400, message);
     }
-
-    await validateConnection(connection);
 
     res.json({
       success: true,
-      message: `Conexão com o Banco Inter validada com sucesso no ambiente de ${toEnvironmentLabel(connection.environment)}.`,
+      message: `Conexão Asaas validada com sucesso no ambiente de ${toEnvironmentLabel(connection.environment)}.`,
+      environment: connection.environment,
+    });
+  }),
+);
+
+router.delete(
+  '/',
+  requireAuth,
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const connection = await loadAsaasConnection(req.currentUser!.companyId);
+    if (!connection) throw new ApiError(404, 'Nenhuma conexão Asaas encontrada.');
+
+    const { error } = await supabaseAdmin
+      .from('bank_connections')
+      .delete()
+      .eq('id', connection.id);
+
+    if (error) throw new ApiError(400, error.message || 'Falha ao remover conexão Asaas.');
+
+    res.json({
+      success: true,
+      message: 'Conexão Asaas removida com sucesso.',
     });
   }),
 );

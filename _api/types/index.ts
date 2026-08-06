@@ -7,6 +7,8 @@ export type SessionUser = {
   companyName: string;
 };
 
+export type PixKeyType = 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'EVP';
+
 export type BatchUploadRow = {
   payment_id: string;
   recipient_name: string;

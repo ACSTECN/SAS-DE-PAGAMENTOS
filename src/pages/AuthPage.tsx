@@ -91,7 +91,7 @@ export function AuthPage() {
               {heroTitle}
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-              Multiempresa, conexão Banco Inter por cliente, pagamento unitário e em lote, execução via API e histórico operacional em um único cockpit.
+              Multiempresa, conexão Asaas por cliente, pagamento unitário e em lote, execução via API e histórico operacional em um único cockpit.
             </p>
           </div>
 

@@ -16,26 +16,32 @@ export type AppSession = {
 export type BankConnection = {
   id: string;
   displayName: string;
-  clientId: string;
+  provider: 'asaas';
   environment: 'sandbox' | 'production';
   status: 'pending' | 'validated' | 'error';
   lastTestedAt?: string;
   validationMessage?: string;
-  hasSecret: boolean;
-  hasCertificate: boolean;
-  hasPrivateKey: boolean;
+  hasApiKey: boolean;
 };
 
 export type Batch = {
   id: string;
   origin: 'upload' | 'manual';
   file_name: string;
-  status: 'draft' | 'validated' | 'confirmed' | 'processing' | 'completed' | 'failed';
+  status:
+    | 'draft'
+    | 'validated'
+    | 'confirmed'
+    | 'processing'
+    | 'completed'
+    | 'failed'
+    | 'partial';
   total_items: number;
   total_valid_items: number;
   total_invalid_items: number;
   total_amount: number;
   created_at: string;
+  confirmed_at?: string;
   processed_at?: string;
 };
 
@@ -49,5 +55,14 @@ export type BatchItem = {
   description?: string;
   status: 'pending' | 'valid' | 'invalid' | 'success' | 'failed';
   error_message?: string;
+  provider_payment_id?: string;
   provider_end_to_end_id?: string;
+  processed_at?: string;
+};
+
+export type BatchProgress = {
+  total: number;
+  success: number;
+  failed: number;
+  pending: number;
 };

@@ -5,13 +5,23 @@ import type { BankConnection, Batch } from '@/lib/types';
 import { MetricCard } from '@/components/MetricCard';
 import { SectionCard } from '@/components/SectionCard';
 
+const nextSteps: Array<[string, string, string]> = [
+  ['1', 'Conectar conta Asaas', '/app/conexao-bancaria'],
+  ['2', 'Enviar primeiro lote', '/app/lotes/novo'],
+  ['3', 'Fazer um PIX unitário', '/app/pagamentos/novo'],
+  ['4', 'Revisar histórico', '/app/lotes'],
+];
+
 export function DashboardPage() {
   const [connection, setConnection] = useState<BankConnection | null>(null);
   const [batches, setBatches] = useState<Batch[]>([]);
 
   useEffect(() => {
     void Promise.all([
-      api.get<{ connection: BankConnection | null }>('/api/bank-connections/inter'),
+      api.get<{
+        connection: BankConnection | null;
+        provider: 'asaas';
+      }>('/api/bank-connections'),
       api.get<{ batches: Batch[] }>('/api/batches'),
     ]).then(([connectionResponse, batchResponse]) => {
       setConnection(connectionResponse.connection);
@@ -20,19 +30,42 @@ export function DashboardPage() {
   }, []);
 
   const totalAmount = batches.reduce((sum, batch) => sum + Number(batch.total_amount), 0);
-  const failedBatches = batches.filter((batch) => batch.status === 'failed').length;
+  const failedBatches = batches.filter((batch) => batch.status === 'failed' || batch.status === 'partial').length;
+  const successRate = batches.length
+    ? batches.filter((batch) => batch.status === 'completed').length / batches.length
+    : 0;
 
   return (
     <div className="space-y-8">
       <div className="grid gap-4 xl:grid-cols-4">
         <MetricCard
-          label="Conta Inter"
+          label="Conta Asaas"
           value={connection?.status === 'validated' ? 'Validada' : 'Pendente'}
-          hint={connection ? `Client ID: ${connection.clientId}` : 'Configure a conexão bancária da empresa.'}
+          hint={
+            connection
+              ? `Ambiente: ${connection.environment === 'production' ? 'Produção' : 'Sandbox'}`
+              : 'Conecte a conta Asaas da empresa para começar.'
+          }
         />
-        <MetricCard label="Lotes recentes" value={String(batches.length)} hint="Últimas operações registradas no cockpit." />
-        <MetricCard label="Volume recente" value={`R$ ${totalAmount.toFixed(2)}`} hint="Somatório dos lotes carregados nesta visão inicial." />
-        <MetricCard label="Lotes com falha" value={String(failedBatches)} hint="Use a tela de histórico para revisar erros e reprocessar itens." />
+        <MetricCard
+          label="Lotes recentes"
+          value={String(batches.length)}
+          hint="Últimas operações registradas no cockpit."
+        />
+        <MetricCard
+          label="Volume recente"
+          value={`R$ ${totalAmount.toFixed(2)}`}
+          hint="Somatório dos últimos lotes carregados nesta visão inicial."
+        />
+        <MetricCard
+          label="Sucesso dos lotes"
+          value={`${Math.round(successRate * 100)}%`}
+          hint={
+            failedBatches > 0
+              ? `${failedBatches} lote(s) com erro ou parcial. Use o histórico para detalhar.`
+              : 'Nenhum lote com falha nesta visão inicial.'
+          }
+        />
       </div>
 
       <div className="grid gap-8 xl:grid-cols-[1.15fr_0.85fr]">
@@ -41,12 +74,7 @@ export function DashboardPage() {
           subtitle="Use esta sequência para colocar a empresa em produção o mais rápido possível."
         >
           <div className="grid gap-4 md:grid-cols-2">
-            {[
-              ['1', 'Validar conexão Inter', '/app/conexao-bancaria'],
-              ['2', 'Enviar primeiro lote', '/app/lotes/novo'],
-              ['3', 'Fazer um PIX unitário', '/app/pagamentos/novo'],
-              ['4', 'Revisar histórico', '/app/lotes'],
-            ].map(([step, label, to]) => (
+            {nextSteps.map(([step, label, to]) => (
               <Link
                 key={step}
                 to={to}
@@ -59,28 +87,34 @@ export function DashboardPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="Status operacional" subtitle="Resumo da empresa autenticada no SaaS.">
+        <SectionCard
+          title="Status operacional"
+          subtitle="Resumo da empresa autenticada no SaaS."
+        >
           <div className="space-y-4">
             <div className="rounded-3xl border border-white/10 bg-slate-950/70 p-5">
               <div className="text-sm text-slate-400">Conectividade bancária</div>
               <div className="mt-3 text-xl font-semibold text-white">
                 {connection?.status === 'validated'
-                  ? 'A conta está pronta para pagamento.'
-                  : 'A conta ainda precisa ser validada.'}
+                  ? 'A conta Asaas está pronta para pagamento.'
+                  : 'Conecte a API Key Asaas desta empresa.'}
               </div>
             </div>
 
             <div className="rounded-3xl border border-white/10 bg-slate-950/70 p-5">
               <div className="text-sm text-slate-400">Modo de operação</div>
               <div className="mt-3 text-xl font-semibold text-white">
-                PIX unitário e lote com retorno por item.
+                PIX unitário e lote com retorno por item e retentativa.
               </div>
             </div>
           </div>
         </SectionCard>
       </div>
 
-      <SectionCard title="Últimos lotes" subtitle="Visualização rápida das execuções mais recentes.">
+      <SectionCard
+        title="Últimos lotes"
+        subtitle="Visualização rápida das execuções mais recentes."
+      >
         <div className="overflow-hidden rounded-3xl border border-white/10">
           <table className="min-w-full divide-y divide-white/10 text-left text-sm">
             <thead className="bg-white/5 text-slate-300">
@@ -100,7 +134,10 @@ export function DashboardPage() {
                   <td className="px-4 py-3">{batch.total_items}</td>
                   <td className="px-4 py-3">R$ {Number(batch.total_amount).toFixed(2)}</td>
                   <td className="px-4 py-3">
-                    <Link className="text-cyan-300 hover:text-cyan-200" to={`/app/lotes/${batch.id}`}>
+                    <Link
+                      className="text-cyan-300 hover:text-cyan-200"
+                      to={`/app/lotes/${batch.id}`}
+                    >
                       Abrir detalhe
                     </Link>
                   </td>
@@ -109,7 +146,7 @@ export function DashboardPage() {
               {!batches.length ? (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
-                    Nenhum lote encontrado. Crie o primeiro upload para iniciar a operação.
+                    Nenhum lote encontrado. Conecte a conta Asaas e crie o primeiro upload.
                   </td>
                 </tr>
               ) : null}
