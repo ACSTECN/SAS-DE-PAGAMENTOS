@@ -15,6 +15,14 @@ import { ApiError } from './lib/api-error.js';
 
 const app: express.Application = express();
 
+app.get('/api/health', (_req: Request, res: Response): void => {
+  res.status(200).json({
+    success: true,
+    message: 'ok',
+    app_url: env.appUrl || 'fallback',
+  });
+});
+
 app.use(
   cors({
     origin: [env.appUrl, 'http://localhost:5173'],
@@ -40,36 +48,30 @@ app.use('/api/bank-connections', bankConnectionRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/batches', batchRoutes);
 
-app.use('/api/health', (_req: Request, res: Response): void => {
-  res.status(200).json({
-    success: true,
-    message: 'ok',
-  });
-});
-
 app.use((error: Error, _req: Request, res: Response, next: NextFunction) => {
   void next;
 
-  // Loga ERRO COMPLETO nos logs da Vercel (para voce ver quando abrir a aba Logs)
+  const rawMessage = error?.message || '';
+
   // eslint-disable-next-line no-console
   console.error('[API_ERROR]', {
-    name: error.name,
-    message: error.message,
-    stack: error.stack,
+    name: error?.name,
+    message: rawMessage,
+    stack: error?.stack,
   });
 
   const statusCode = error instanceof ApiError ? error.statusCode : 500;
-  let message = error instanceof ApiError ? error.message : error.message;
+  const primaryMessage = error instanceof ApiError ? error.message : error.message;
 
-  // Se mensagem for vazia ou muito generica, deixa o fallback com stack curto
-  if (!message || /^[A-Za-z\s]*internal[A-Za-z\s]*$/i.test(message)) {
-    message = `Erro interno (${error.name || 'desconhecido'}) — verifique Environment Variables e os logs da Vercel.`;
-  }
+  const displayMessage: string =
+    primaryMessage && primaryMessage.trim().length > 0
+      ? primaryMessage
+      : `Erro interno (${error?.name || 'desconhecido'}) — verifique as Environment Variables configuradas na Vercel e faça Redeploy.`;
 
   res.status(statusCode).json({
     success: false,
-    error: message,
-    error_name: error.name || undefined,
+    error: displayMessage,
+    error_name: error?.name || undefined,
   });
 });
 
