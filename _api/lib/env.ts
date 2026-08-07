@@ -22,7 +22,16 @@ export const env = {
 };
 
 export function ensureBackendEnv() {
-  if (!env.supabaseUrl || !env.supabaseAnonKey || !env.supabaseServiceRoleKey) {
-    throw new Error('Supabase não configurado. Defina SUPABASE_URL, SUPABASE_ANON_KEY e SUPABASE_SERVICE_ROLE_KEY.');
+  const missing: string[] = [];
+  if (!env.supabaseUrl) missing.push('SUPABASE_URL');
+  if (!env.supabaseAnonKey) missing.push('SUPABASE_ANON_KEY');
+  if (!env.supabaseServiceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+
+  if (missing.length > 0) {
+    throw new Error(
+      'Configuração obrigatória ausente na Vercel: adicione as seguintes Environment Variables e faça Redeploy → ' +
+        missing.join(', '),
+    );
   }
 }
+

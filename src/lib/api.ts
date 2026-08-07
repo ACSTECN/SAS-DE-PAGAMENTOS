@@ -34,10 +34,25 @@ async function request<T>(path: string, options: RequestOptions = {}) {
     : await response.text();
 
   if (!response.ok) {
-    const message =
-      typeof payload === 'object' && payload && 'error' in payload
-        ? String(payload.error)
-        : 'Falha na comunicação com a API.';
+    let message = 'Falha na comunicação com a API.';
+
+    if (typeof payload === 'string') {
+      message = payload || message;
+    } else if (typeof payload === 'object' && payload) {
+      const candidates = [
+        (payload as { error?: unknown }).error,
+        (payload as { error?: { message?: string } }).error &&
+          (payload as { error: { message?: string } }).error.message,
+        (payload as { error?: { code?: string } }).error &&
+          (payload as { error: { code?: string } }).error.code,
+        (payload as { message?: unknown }).message,
+        (payload as { statusText?: string }).statusText,
+      ].filter((v): v is string => typeof v === 'string' && v.length > 0);
+
+      if (candidates.length) {
+        message = candidates[0];
+      }
+    }
 
     throw new Error(message);
   }

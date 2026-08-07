@@ -10,7 +10,7 @@ import bankConnectionRoutes from './routes/bankConnections.js';
 import paymentRoutes from './routes/payments.js';
 import batchRoutes from './routes/batches.js';
 import adminRoutes from './routes/admin.js';
-import { env } from './lib/env.js';
+import { env, ensureBackendEnv } from './lib/env.js';
 import { ApiError } from './lib/api-error.js';
 
 const app: express.Application = express();
@@ -23,6 +23,15 @@ app.use(
 );
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+
+app.use((_req: Request, _res: Response, next: NextFunction): void => {
+  try {
+    ensureBackendEnv();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/me', meRoutes);
