@@ -1,12 +1,15 @@
 import { Router, type Response } from 'express';
 import { ApiError, asyncHandler } from '../lib/api-error.js';
-import { requireAuth, type AuthenticatedRequest } from '../lib/auth.js';
+import { requireAuth, requireTenantUser, type AuthenticatedRequest } from '../lib/auth.js';
 import { decryptSensitiveValue } from '../lib/crypto.js';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { executePixTransfer } from '../services/asaas.js';
 import type { BatchItemExecutionResult } from '../types/index.js';
 
 const router = Router();
+
+router.use(requireAuth);
+router.use(requireTenantUser);
 
 type ConnectionRow = {
   id: string;
@@ -81,7 +84,6 @@ async function saveAttemptAndUpdate(
 
 router.post(
   '/single',
-  requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { paymentId, recipientName, recipientDocument, pixKey, amount, description } =
       req.body ?? {};

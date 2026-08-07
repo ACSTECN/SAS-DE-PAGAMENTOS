@@ -31,7 +31,7 @@ create table if not exists company_users (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references companies(id) on delete cascade,
   user_id uuid not null references users(id) on delete cascade,
-  role text not null check (role in ('admin', 'operator')),
+  role text not null check (role in ('admin', 'operator', 'super_admin')),
   created_at timestamptz not null default now(),
   unique (company_id, user_id)
 );

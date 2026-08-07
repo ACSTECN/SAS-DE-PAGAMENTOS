@@ -9,6 +9,7 @@ import meRoutes from './routes/me.js';
 import bankConnectionRoutes from './routes/bankConnections.js';
 import paymentRoutes from './routes/payments.js';
 import batchRoutes from './routes/batches.js';
+import adminRoutes from './routes/admin.js';
 import { env } from './lib/env.js';
 import { ApiError } from './lib/api-error.js';
 
@@ -25,6 +26,7 @@ app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/me', meRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/bank-connections', bankConnectionRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/batches', batchRoutes);

@@ -1,11 +1,14 @@
 import { Router, type Response } from 'express';
 import { ApiError, asyncHandler } from '../lib/api-error.js';
-import { requireAuth, type AuthenticatedRequest } from '../lib/auth.js';
+import { requireAuth, requireTenantUser, type AuthenticatedRequest } from '../lib/auth.js';
 import { decryptSensitiveValue, encryptSensitiveValue } from '../lib/crypto.js';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { validateAsaasConnection } from '../services/asaas.js';
 
 const router = Router();
+
+router.use(requireAuth);
+router.use(requireTenantUser);
 
 type AsaasConnectionRow = {
   id: string;
@@ -59,7 +62,6 @@ function getAsaasApiKey(conn: AsaasConnectionRow): string {
 
 router.get(
   '/',
-  requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const connection = await loadAsaasConnection(req.currentUser!.companyId);
 
@@ -85,7 +87,6 @@ router.get(
 
 router.post(
   '/',
-  requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { apiKey, environment } = req.body ?? {};
     const selectedEnvironment: 'sandbox' | 'production' =
@@ -149,7 +150,6 @@ router.post(
 
 router.post(
   '/test',
-  requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const connection = await loadAsaasConnection(req.currentUser!.companyId);
     if (!connection) throw new ApiError(404, 'Configure a conexão Asaas antes de testar.');
@@ -179,7 +179,6 @@ router.post(
 
 router.delete(
   '/',
-  requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const connection = await loadAsaasConnection(req.currentUser!.companyId);
     if (!connection) throw new ApiError(404, 'Nenhuma conexão Asaas encontrada.');

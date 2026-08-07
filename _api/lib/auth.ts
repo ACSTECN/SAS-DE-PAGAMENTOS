@@ -7,8 +7,11 @@ export type AuthenticatedRequest = Request & {
   currentUser?: SessionUser;
 };
 
+const PLATFORM_HOLDING_COMPANY_ID = '00000000-0000-0000-0000-000000000001';
+const PLATFORM_HOLDING_COMPANY_NAME = 'Plataforma SaaS - Operadora';
+
 async function resolveUserContext(userId: string) {
-  const { data, error } = await supabaseAdmin
+  const { data: memberships, error } = await supabaseAdmin
     .from('company_users')
     .select(
       `
@@ -18,22 +21,38 @@ async function resolveUserContext(userId: string) {
       `,
     )
     .eq('user_id', userId)
-    .limit(1)
-    .maybeSingle();
+    .limit(5);
 
   if (error) {
     throw new ApiError(500, 'Falha ao carregar contexto do usuário.');
   }
 
-  if (!data || !data.user || !data.company) {
+  if (!memberships || memberships.length === 0) {
     throw new ApiError(403, 'Usuário não vinculado a nenhuma empresa.');
   }
 
-  const company = Array.isArray(data.company) ? data.company[0] : data.company;
-  const user = Array.isArray(data.user) ? data.user[0] : data.user;
+  const superAdminMembership = memberships.find((m) => m.role === 'super_admin');
+  const primaryMembership = superAdminMembership || memberships[0];
+
+  const companyRaw = (primaryMembership as unknown as { company: unknown }).company;
+  const userRaw = (primaryMembership as unknown as { user: unknown }).user;
+
+  const company = Array.isArray(companyRaw) ? companyRaw[0] : (companyRaw as { id: string; name: string; status: string } | null);
+  const user = Array.isArray(userRaw) ? userRaw[0] : (userRaw as { id: string; email: string; name: string; active: boolean } | null);
 
   if (!company || !user) {
     throw new ApiError(403, 'Contexto inválido para o usuário autenticado.');
+  }
+
+  if (superAdminMembership) {
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: 'super_admin',
+      companyId: PLATFORM_HOLDING_COMPANY_ID,
+      companyName: PLATFORM_HOLDING_COMPANY_NAME,
+    } satisfies SessionUser;
   }
 
   if (!user.active || company.status !== 'active') {
@@ -44,10 +63,35 @@ async function resolveUserContext(userId: string) {
     id: user.id,
     email: user.email,
     name: user.name,
-    role: data.role,
+    role: primaryMembership.role as 'admin' | 'operator',
     companyId: company.id,
     companyName: company.name,
   } satisfies SessionUser;
+}
+
+export function requireSuperAdmin(
+  req: AuthenticatedRequest,
+  _res: Response,
+  next: NextFunction,
+) {
+  if (!req.currentUser || req.currentUser.role !== 'super_admin') {
+    return next(new ApiError(403, 'Acesso exclusivo do administrador da plataforma.'));
+  }
+  next();
+}
+
+export function requireTenantUser(
+  req: AuthenticatedRequest,
+  _res: Response,
+  next: NextFunction,
+) {
+  if (!req.currentUser) {
+    return next(new ApiError(401, 'Sessão ausente.'));
+  }
+  if (req.currentUser.role === 'super_admin') {
+    return next(new ApiError(403, 'Acesso negado. O administrador da plataforma não executa operações financeiras em nome de clientes.'));
+  }
+  next();
 }
 
 export async function requireAuth(

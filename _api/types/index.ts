@@ -2,7 +2,7 @@ export type SessionUser = {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'operator';
+  role: 'admin' | 'operator' | 'super_admin';
   companyId: string;
   companyName: string;
 };

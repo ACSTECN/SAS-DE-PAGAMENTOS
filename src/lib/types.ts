@@ -2,9 +2,25 @@ export type AppUser = {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'operator';
+  role: 'admin' | 'operator' | 'super_admin';
   companyId: string;
   companyName: string;
+};
+
+export type AdminCompanySummary = {
+  id: string;
+  name: string;
+  document: string;
+  status: 'active' | 'inactive';
+  created_at: string;
+  bank_connection_status: 'pending' | 'validated' | 'error' | 'none';
+  bank_connection_environment: 'sandbox' | 'production' | null;
+  total_batches: number;
+  total_items: number;
+  total_amount: string;
+  total_completed_batches: number;
+  total_failed_batches: number;
+  users_count: number;
 };
 
 export type AppSession = {

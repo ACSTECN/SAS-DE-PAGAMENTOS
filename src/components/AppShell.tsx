@@ -1,19 +1,39 @@
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { Building2, CreditCard, FileClock, LayoutDashboard, LogOut, Upload } from 'lucide-react';
+import { Building2, CreditCard, FileClock, LayoutDashboard, LogOut, Upload, FileSpreadsheet, ShieldCheck, Users2 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 
-const navItems = [
+const tenantNavItems = [
   { to: '/app', label: 'Painel', icon: LayoutDashboard },
-  { to: '/app/conexao-bancaria', label: 'Conta Inter', icon: Building2 },
+  { to: '/app/conexao-bancaria', label: 'Conta Asaas', icon: Building2 },
+  { to: '/app/layout-planilha', label: 'Layout da planilha', icon: FileSpreadsheet },
   { to: '/app/pagamentos/novo', label: 'PIX unitário', icon: CreditCard },
   { to: '/app/lotes/novo', label: 'Novo lote', icon: Upload },
   { to: '/app/lotes', label: 'Histórico', icon: FileClock },
+];
+
+const superAdminNavItems = [
+  { to: '/app', label: 'Visão geral', icon: ShieldCheck },
+  { to: '/app/admin/clientes', label: 'Gestão de clientes', icon: Users2 },
+  { to: '/app/layout-planilha', label: 'Layout da planilha', icon: FileSpreadsheet },
 ];
 
 export function AppShell() {
   const navigate = useNavigate();
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
+
+  const isSuperAdmin = user?.role === 'super_admin';
+  const navItems = isSuperAdmin ? superAdminNavItems : tenantNavItems;
+  const headerLabel = isSuperAdmin ? 'Conta operadora' : 'Empresa ativa';
+  const roleLabel = isSuperAdmin ? (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-cyan-200">
+      <ShieldCheck size={11}/> Super Admin
+    </span>
+  ) : (
+    <span className="text-[11px] uppercase tracking-wider text-slate-400">
+      {user?.role === 'admin' ? 'Administrador' : 'Operador'}
+    </span>
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -23,7 +43,9 @@ export function AppShell() {
             <div className="text-sm uppercase tracking-[0.4em] text-cyan-300/80">Orquestra PIX</div>
             <div className="mt-3 text-3xl font-semibold tracking-tight text-white">Pagamentos B2B</div>
             <p className="mt-3 text-sm text-slate-400">
-              Operação multiempresa para pagamentos unitários e em lote.
+              {isSuperAdmin
+                ? 'Painel operacional — acompanhe todos os clientes e repasses da plataforma.'
+                : 'Operação multiempresa para pagamentos unitários e em lote.'}
             </p>
           </Link>
 
@@ -55,7 +77,10 @@ export function AppShell() {
           <header className="border-b border-white/10 bg-slate-950/70 backdrop-blur">
             <div className="flex items-center justify-between px-6 py-5 lg:px-10">
               <div>
-                <div className="text-xs uppercase tracking-[0.35em] text-slate-500">Empresa ativa</div>
+                <div className="flex items-center gap-3">
+                  <div className="text-xs uppercase tracking-[0.35em] text-slate-500">{headerLabel}</div>
+                  {roleLabel}
+                </div>
                 <div className="mt-2 text-xl font-semibold text-white">{user?.companyName}</div>
               </div>
 

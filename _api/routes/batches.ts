@@ -1,7 +1,7 @@
 import { Router, type Response } from 'express';
 import multer from 'multer';
 import { ApiError, asyncHandler } from '../lib/api-error.js';
-import { requireAuth, type AuthenticatedRequest } from '../lib/auth.js';
+import { requireAuth, requireTenantUser, type AuthenticatedRequest } from '../lib/auth.js';
 import { decryptSensitiveValue } from '../lib/crypto.js';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { parseSpreadsheet, validateRows } from '../services/batches.js';
@@ -10,6 +10,9 @@ import type { BatchItemExecutionResult } from '../types/index.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
+
+router.use(requireAuth);
+router.use(requireTenantUser);
 
 type ConnectionRow = {
   id: string;
@@ -136,7 +139,6 @@ async function saveAttemptAndUpdate(
 
 router.post(
   '/',
-  requireAuth,
   upload.single('file'),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const file = req.file;
@@ -209,7 +211,6 @@ router.post(
 
 router.get(
   '/',
-  requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { data, error } = await supabaseAdmin
       .from('batches')
@@ -230,7 +231,6 @@ router.get(
 
 router.get(
   '/:id',
-  requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const batch = await loadCompanyBatch(req.currentUser!.companyId, req.params.id);
     const { data: items, error } = await supabaseAdmin
@@ -279,7 +279,6 @@ router.get(
 
 router.post(
   '/:id/confirm',
-  requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const batch = await loadCompanyBatch(req.currentUser!.companyId, req.params.id);
     const connection = await loadAsaasConnection(
@@ -347,7 +346,6 @@ router.post(
 
 router.post(
   '/:id/retry-item',
-  requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { itemId } = req.body ?? {};
     if (!itemId) throw new ApiError(400, 'Informe o item a ser reprocessado.');
@@ -402,7 +400,6 @@ router.post(
 
 router.get(
   '/:id/export',
-  requireAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const batch = await loadCompanyBatch(req.currentUser!.companyId, req.params.id);
     const { data: items, error } = await supabaseAdmin
