@@ -49,13 +49,27 @@ app.use('/api/health', (_req: Request, res: Response): void => {
 
 app.use((error: Error, _req: Request, res: Response, next: NextFunction) => {
   void next;
+
+  // Loga ERRO COMPLETO nos logs da Vercel (para voce ver quando abrir a aba Logs)
+  // eslint-disable-next-line no-console
+  console.error('[API_ERROR]', {
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+  });
+
   const statusCode = error instanceof ApiError ? error.statusCode : 500;
-  const message =
-    error instanceof ApiError ? error.message : 'Erro interno do servidor.';
+  let message = error instanceof ApiError ? error.message : error.message;
+
+  // Se mensagem for vazia ou muito generica, deixa o fallback com stack curto
+  if (!message || /^[A-Za-z\s]*internal[A-Za-z\s]*$/i.test(message)) {
+    message = `Erro interno (${error.name || 'desconhecido'}) — verifique Environment Variables e os logs da Vercel.`;
+  }
 
   res.status(statusCode).json({
     success: false,
     error: message,
+    error_name: error.name || undefined,
   });
 });
 
