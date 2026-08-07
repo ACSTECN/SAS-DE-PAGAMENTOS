@@ -119,9 +119,30 @@ router.post(
       throw new ApiError(400, 'A senha do responsável deve ter no mínimo 6 caracteres.');
     }
 
+    const normalizedOwnerEmail = ownerEmail.trim().toLowerCase();
+
+    const { data: existingAuthUser } = await supabaseAdmin.auth.admin.listUsers();
+    const alreadyExistsAuth = (existingAuthUser?.users ?? []).find(
+      (u) => u.email?.trim().toLowerCase() === normalizedOwnerEmail,
+    );
+
+    const { data: alreadyExistsProfile } = await supabaseAdmin
+      .from('users')
+      .select('id, email')
+      .ilike('email', normalizedOwnerEmail)
+      .limit(1)
+      .maybeSingle();
+
+    if (alreadyExistsAuth || alreadyExistsProfile) {
+      throw new ApiError(
+        400,
+        `Já existe um usuário cadastrado com o e-mail ${normalizedOwnerEmail}. Crie um novo e-mail para este cliente ou exclua o usuário existente primeiro.`,
+      );
+    }
+
     const { data: userCreation, error: userCreationError } =
       await supabaseAdmin.auth.admin.createUser({
-        email: ownerEmail,
+        email: normalizedOwnerEmail,
         password: ownerPassword,
         email_confirm: true,
       });
@@ -148,22 +169,28 @@ router.post(
       }
       companyId = company.id;
 
-      const { error: profileError } = await supabaseAdmin.from('users').insert({
-        id: authUserId,
-        name: ownerName,
-        email: ownerEmail,
-        active: true,
-      });
+      const { error: profileError } = await supabaseAdmin.from('users').upsert(
+        {
+          id: authUserId,
+          name: ownerName,
+          email: normalizedOwnerEmail,
+          active: true,
+        },
+        { onConflict: 'id', ignoreDuplicates: false },
+      );
 
       if (profileError) {
         throw new ApiError(400, profileError.message || 'Falha ao criar perfil do responsável.');
       }
 
-      const { error: membershipError } = await supabaseAdmin.from('company_users').insert({
-        company_id: company.id,
-        user_id: authUserId,
-        role: 'admin',
-      });
+      const { error: membershipError } = await supabaseAdmin.from('company_users').upsert(
+        {
+          company_id: company.id,
+          user_id: authUserId,
+          role: 'admin',
+        },
+        { onConflict: 'company_id, user_id', ignoreDuplicates: false },
+      );
 
       if (membershipError) {
         throw new ApiError(400, membershipError.message || 'Falha ao vincular responsável à empresa.');
