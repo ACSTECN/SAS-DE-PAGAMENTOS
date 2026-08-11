@@ -14,9 +14,18 @@ import {
   type InterConnectionCredentials,
   type InterEnvironment,
 } from './inter.js';
-import { decryptField, encryptField } from '../lib/crypto.js';
-import type { BankConnection } from '@prisma/client'; // NÃO usamos prisma; alias para types local
-import type { TransferResultItem } from '../types/index.js';
+import { decryptSensitiveValue, encryptSensitiveValue } from '../lib/crypto.js';
+
+export type TransferResultItem = {
+  idempotencyKey: string;
+  success: boolean;
+  amountCents: number;
+  pixKey: string;
+  providerPaymentId?: string;
+  endToEndId?: string;
+  errorMessage?: string;
+  raw?: unknown;
+};
 
 export type BankProvider = 'asaas' | 'inter';
 
@@ -49,32 +58,31 @@ export interface UnifiedConnectionPayload {
 /**
  * Cria a conexão criptografada no formato da tabela bank_connections, dependendo do provider.
  */
-export function encryptConnectionForInsert(payload: UnifiedConnectionPayload): Partial<BankConnection> {
-  const base: Partial<BankConnection> = {
+export function encryptConnectionForInsert(payload: UnifiedConnectionPayload) {
+  const base = {
     bank_code: payload.bank_code,
     environment: payload.environment,
-    status: 'pending',
+    status: 'pending' as const,
   };
 
   if (payload.bank_code === 'asaas') {
     return {
       ...base,
-      api_key_encrypted: encryptField(payload.api_key_plain || ''),
-      client_id_encrypted: encryptField('na'),
-      client_secret_encrypted: encryptField('na'),
-      certificate_encrypted: encryptField('na'),
-      private_key_encrypted: encryptField('na'),
+      api_key_encrypted: encryptSensitiveValue(payload.api_key_plain || ''),
+      client_id_encrypted: encryptSensitiveValue('na'),
+      client_secret_encrypted: encryptSensitiveValue('na'),
+      certificate_encrypted: encryptSensitiveValue('na'),
+      private_key_encrypted: encryptSensitiveValue('na'),
     };
   }
 
-  // Banco Inter: precisamos de clientId, clientSecret, certificate, privateKey (em PEM)
   return {
     ...base,
-    api_key_encrypted: encryptField('na'),
-    client_id_encrypted: encryptField(payload.client_id_plain || ''),
-    client_secret_encrypted: encryptField(payload.client_secret_plain || ''),
-    certificate_encrypted: encryptField(payload.certificate_pem_plain || ''),
-    private_key_encrypted: encryptField(payload.private_key_pem_plain || ''),
+    api_key_encrypted: encryptSensitiveValue('na'),
+    client_id_encrypted: encryptSensitiveValue(payload.client_id_plain || ''),
+    client_secret_encrypted: encryptSensitiveValue(payload.client_secret_plain || ''),
+    certificate_encrypted: encryptSensitiveValue(payload.certificate_pem_plain || ''),
+    private_key_encrypted: encryptSensitiveValue(payload.private_key_pem_plain || ''),
   };
 }
 
@@ -97,7 +105,7 @@ export function decryptConnection(conn: {
   const env = (conn.environment || 'sandbox').toLowerCase() === 'production' ? 'production' : 'sandbox';
 
   if (provider === 'asaas') {
-    const apiKey = decryptField(conn.api_key_encrypted || '');
+    const apiKey = decryptSensitiveValue(conn.api_key_encrypted || '');
     if (!apiKey || apiKey === 'na') return null;
     return {
       provider: 'asaas',
@@ -111,10 +119,10 @@ export function decryptConnection(conn: {
   }
 
   if (provider === 'inter') {
-    const clientId = decryptField(conn.client_id_encrypted || '');
-    const clientSecret = decryptField(conn.client_secret_encrypted || '');
-    const cert = decryptField(conn.certificate_encrypted || '');
-    const priv = decryptField(conn.private_key_encrypted || '');
+    const clientId = decryptSensitiveValue(conn.client_id_encrypted || '');
+    const clientSecret = decryptSensitiveValue(conn.client_secret_encrypted || '');
+    const cert = decryptSensitiveValue(conn.certificate_encrypted || '');
+    const priv = decryptSensitiveValue(conn.private_key_encrypted || '');
     if (!clientId || clientId === 'na' || !clientSecret || clientSecret === 'na') return null;
     if (!cert || cert === 'na' || !priv || priv === 'na') return null;
     return {
