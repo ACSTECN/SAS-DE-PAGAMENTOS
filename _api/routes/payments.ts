@@ -1,9 +1,12 @@
 import { Router, type Response } from 'express';
 import { ApiError, asyncHandler } from '../lib/api-error.js';
 import { requireAuth, requireTenantUser, type AuthenticatedRequest } from '../lib/auth.js';
-import { decryptSensitiveValue } from '../lib/crypto.js';
 import { supabaseAdmin } from '../lib/supabase.js';
-import { executePixTransfer } from '../services/asaas.js';
+import {
+  decryptConnection,
+  executeUnifiedPixTransfer,
+  type BankProvider,
+} from '../services/bankProvider.js';
 import type { BatchItemExecutionResult } from '../types/index.js';
 
 const router = Router();
@@ -11,12 +14,16 @@ const router = Router();
 router.use(requireAuth);
 router.use(requireTenantUser);
 
-type ConnectionRow = {
+type AnyConnectionRow = {
   id: string;
-  bank_code: 'asaas';
+  company_id: string;
+  bank_code: string;
   environment: 'sandbox' | 'production';
-  api_key_encrypted?: string | null;
-  client_secret_encrypted?: string | null;
+  api_key_encrypted: string | null;
+  client_id_encrypted: string | null;
+  client_secret_encrypted: string | null;
+  certificate_encrypted: string | null;
+  private_key_encrypted: string | null;
 };
 
 type BatchItemRow = {
@@ -29,31 +36,42 @@ type BatchItemRow = {
   description: string | null;
 };
 
-function getDecryptedAsaasKey(conn: ConnectionRow): string {
-  if (conn.api_key_encrypted) return decryptSensitiveValue(conn.api_key_encrypted);
-  if (conn.client_secret_encrypted) return decryptSensitiveValue(conn.client_secret_encrypted);
-  throw new ApiError(400, 'API Key da Asaas não encontrada na conexão da empresa.');
+function assertValidProvider(p: unknown): BankProvider {
+  if (p === 'asaas' || p === 'inter') return p as BankProvider;
+  throw new ApiError(400, 'Provedor bancário inválido nesta conexão. Reconfigure a conexão da empresa.');
 }
 
-async function loadAsaasConnection(companyId: string, connectionId?: string) {
+async function loadActiveConnectionForCompany(companyId: string, connectionId?: string | null) {
   const query = supabaseAdmin
     .from('bank_connections')
     .select('*')
     .eq('company_id', companyId)
-    .eq('bank_code', 'asaas');
+    .in('bank_code', ['asaas', 'inter'])
+    .order('updated_at', { ascending: false })
+    .limit(1);
 
   const { data, error } = connectionId
-    ? await query.eq('id', connectionId).maybeSingle()
+    ? await supabaseAdmin
+        .from('bank_connections')
+        .select('*')
+        .eq('company_id', companyId)
+        .eq('id', connectionId)
+        .maybeSingle()
     : await query.maybeSingle();
 
-  if (error) throw new ApiError(500, 'Falha ao carregar conexão Asaas.');
-  if (!data) {
+  const row = Array.isArray(data) ? data[0] : data;
+  if (error) throw new ApiError(500, 'Falha ao carregar conexão bancária da empresa.');
+  if (!row) {
     throw new ApiError(
       400,
-      'A empresa ainda não configurou a sua conexão com a Asaas.',
+      'Conecte sua conta bancária (Asaas ou Banco Inter) antes de enviar pagamentos.',
     );
   }
-  return data as unknown as ConnectionRow;
+  const typed = row as AnyConnectionRow;
+  assertValidProvider(typed.bank_code);
+  const decoded = decryptConnection(typed);
+  if (!decoded) throw new ApiError(400, 'Não foi possível descriptografar as credenciais da conexão bancária. Reconfigure a conexão.');
+  return { row: typed, decoded, provider: decoded.provider, credentials: decoded.credentials };
 }
 
 async function saveAttemptAndUpdate(
@@ -92,14 +110,14 @@ router.post(
       throw new ApiError(400, 'Informe os dados obrigatórios do pagamento.');
     }
 
-    const connection = await loadAsaasConnection(req.currentUser!.companyId);
+    const { row, provider, credentials } = await loadActiveConnectionForCompany(req.currentUser!.companyId);
 
     const { data: batch, error: batchError } = await supabaseAdmin
       .from('batches')
       .insert({
         company_id: req.currentUser!.companyId,
         created_by: req.currentUser!.id,
-        bank_connection_id: connection.id,
+        bank_connection_id: row.id,
         origin: 'manual',
         file_name: `manual-${String(paymentId)}`,
         status: 'processing',
@@ -135,23 +153,28 @@ router.post(
       throw new ApiError(400, itemError?.message || 'Falha ao registrar pagamento.');
     }
 
-    const row = item as unknown as BatchItemRow;
-    const result = await executePixTransfer(
-      {
-        apiKey: getDecryptedAsaasKey(connection),
-        environment: connection.environment,
-      },
-      {
-        paymentId: row.payment_id,
-        recipientName: row.recipient_name,
-        recipientDocument: row.recipient_document,
-        pixKey: row.pix_key,
-        amount: Number(row.amount),
-        description: row.description || '',
-      },
-    );
+    const rowItem = item as unknown as BatchItemRow;
 
-    await saveAttemptAndUpdate(row.id, row.payment_id, result);
+    const result = await executeUnifiedPixTransfer(provider, credentials, {
+      idempotencyKey: rowItem.payment_id,
+      pixKey: rowItem.pix_key,
+      amountCents: Math.round(Number(rowItem.amount) * 100),
+      description: rowItem.description || '',
+      beneficiaryName: rowItem.recipient_name,
+      beneficiaryDocument: rowItem.recipient_document,
+    });
+
+    // Normaliza para formato antigo compat (executeUnifiedPixTransfer retorna TransferResultItem, precisamos adaptar)
+    const compat: BatchItemExecutionResult = {
+      status: result.status,
+      providerPaymentId: result.provider_payment_id ?? undefined,
+      providerMessage: result.error_message ?? undefined,
+      providerEndToEndId: (result as unknown as { end_to_end_id?: string }).end_to_end_id ?? undefined,
+      httpStatus: undefined,
+      providerResponse: null,
+    };
+
+    await saveAttemptAndUpdate(rowItem.id, rowItem.payment_id, compat);
 
     await supabaseAdmin
       .from('batches')
@@ -163,6 +186,7 @@ router.post(
 
     res.json({
       success: result.status === 'success',
+      provider,
       batchId: batch.id,
       result,
     });

@@ -29,15 +29,21 @@ export type AppSession = {
   expiresAt?: number;
 };
 
+export type BankProvider = 'asaas' | 'inter';
+
 export type BankConnection = {
   id: string;
   displayName: string;
-  provider: 'asaas';
+  provider: BankProvider;
   environment: 'sandbox' | 'production';
   status: 'pending' | 'validated' | 'error';
   lastTestedAt?: string;
   validationMessage?: string;
   hasApiKey: boolean;
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  hasCertificate: boolean;
+  hasPrivateKey: boolean;
 };
 
 export type Batch = {

@@ -1,16 +1,26 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '@/lib/api';
-import type { BankConnection, Batch } from '@/lib/types';
+import type { BankConnection, BankProvider, Batch } from '@/lib/types';
 import { MetricCard } from '@/components/MetricCard';
 import { SectionCard } from '@/components/SectionCard';
 
 const nextSteps: Array<[string, string, string]> = [
-  ['1', 'Conectar conta Asaas', '/app/conexao-bancaria'],
+  ['1', 'Conectar conta bancária', '/app/conexao-bancaria'],
   ['2', 'Enviar primeiro lote', '/app/lotes/novo'],
   ['3', 'Fazer um PIX unitário', '/app/pagamentos/novo'],
   ['4', 'Revisar histórico', '/app/lotes'],
 ];
+
+function getProviderDisplay(provider: BankProvider) {
+  if (provider === 'asaas') return 'Asaas';
+  return 'Banco Inter';
+}
+
+function getAccountLabel(connection: BankConnection | null) {
+  if (!connection) return 'Conta bancária';
+  return `Conta ${getProviderDisplay(connection.provider)}`;
+}
 
 export function DashboardPage() {
   const [connection, setConnection] = useState<BankConnection | null>(null);
@@ -20,7 +30,7 @@ export function DashboardPage() {
     void Promise.all([
       api.get<{
         connection: BankConnection | null;
-        provider: 'asaas';
+        provider: BankProvider;
       }>('/api/bank-connections'),
       api.get<{ batches: Batch[] }>('/api/batches'),
     ]).then(([connectionResponse, batchResponse]) => {
@@ -35,16 +45,18 @@ export function DashboardPage() {
     ? batches.filter((batch) => batch.status === 'completed').length / batches.length
     : 0;
 
+  const accountLabel = getAccountLabel(connection);
+
   return (
     <div className="space-y-8">
       <div className="grid gap-4 xl:grid-cols-4">
         <MetricCard
-          label="Conta Asaas"
+          label={accountLabel}
           value={connection?.status === 'validated' ? 'Validada' : 'Pendente'}
           hint={
             connection
               ? `Ambiente: ${connection.environment === 'production' ? 'Produção' : 'Sandbox'}`
-              : 'Conecte a conta Asaas da empresa para começar.'
+              : `Conecte a conta ${connection ? getProviderDisplay(connection.provider) : 'Asaas ou Inter'} da empresa para começar.`
           }
         />
         <MetricCard
@@ -96,8 +108,8 @@ export function DashboardPage() {
               <div className="text-sm text-slate-400">Conectividade bancária</div>
               <div className="mt-3 text-xl font-semibold text-white">
                 {connection?.status === 'validated'
-                  ? 'A conta Asaas está pronta para pagamento.'
-                  : 'Conecte a API Key Asaas desta empresa.'}
+                  ? `A conta ${getProviderDisplay(connection.provider)} está pronta para pagamento.`
+                  : 'Conecte a API Key Asaas ou as credenciais Banco Inter desta empresa.'}
               </div>
             </div>
 
@@ -146,7 +158,7 @@ export function DashboardPage() {
               {!batches.length ? (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
-                    Nenhum lote encontrado. Conecte a conta Asaas e crie o primeiro upload.
+                    Nenhum lote encontrado. Conecte a conta bancária e crie o primeiro upload.
                   </td>
                 </tr>
               ) : null}

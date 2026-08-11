@@ -39,10 +39,10 @@ create table if not exists company_users (
 create table if not exists bank_connections (
   id uuid primary key default gen_random_uuid(),
   company_id uuid not null references companies(id) on delete cascade,
-  bank_code text not null default 'asaas' check (bank_code = 'asaas'),
-  display_name text not null default 'Conta Asaas principal',
+  bank_code text not null default 'asaas' check (bank_code in ('asaas', 'inter')),
+  display_name text not null default 'Conta bancária principal',
   environment text not null default 'sandbox' check (environment in ('sandbox', 'production')),
-  client_id text,
+  client_id_encrypted text,
   client_secret_encrypted text,
   certificate_encrypted text,
   private_key_encrypted text,

@@ -4,6 +4,7 @@ dotenv.config();
 
 const fallbackEncryptionKey = 'change-this-development-key-32-bytes!';
 export type AsaasRuntimeEnvironment = 'sandbox' | 'production';
+export type InterRuntimeEnvironment = 'sandbox' | 'production';
 
 export const env = {
   port: Number(process.env.PORT || 3001),
@@ -17,6 +18,20 @@ export const env = {
       process.env.ASAAS_SANDBOX_BASE_URL || 'https://sandbox.asaas.com/api/v3',
     productionBaseUrl:
       process.env.ASAAS_PRODUCTION_BASE_URL || 'https://www.asaas.com/api/v3',
+  },
+  inter: {
+    sandboxTokenUrl:
+      process.env.INTER_SANDBOX_TOKEN_URL ||
+      'https://cdpj.partners.bancointer.com.br/oauth/v2/token',
+    sandboxPixUrl:
+      process.env.INTER_SANDBOX_PIX_URL ||
+      'https://cdpj.partners.bancointer.com.br',
+    productionTokenUrl:
+      process.env.INTER_PRODUCTION_TOKEN_URL ||
+      'https://apis.bancointer.com.br/oauth/v2/token',
+    productionPixUrl:
+      process.env.INTER_PRODUCTION_PIX_URL ||
+      'https://apis.bancointer.com.br',
   },
   mockBankMode: process.env.MOCK_BANK_MODE === 'true',
 };
@@ -34,4 +49,3 @@ export function ensureBackendEnv() {
     );
   }
 }
-

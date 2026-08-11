@@ -2,10 +2,14 @@ import { Router, type Response } from 'express';
 import multer from 'multer';
 import { ApiError, asyncHandler } from '../lib/api-error.js';
 import { requireAuth, requireTenantUser, type AuthenticatedRequest } from '../lib/auth.js';
-import { decryptSensitiveValue } from '../lib/crypto.js';
 import { supabaseAdmin } from '../lib/supabase.js';
 import { parseSpreadsheet, validateRows } from '../services/batches.js';
-import { executeBatchTransferQueue } from '../services/asaas.js';
+import {
+  decryptConnection,
+  executeUnifiedBatchQueue,
+  executeUnifiedPixTransfer,
+  type BankProvider,
+} from '../services/bankProvider.js';
 import type { BatchItemExecutionResult } from '../types/index.js';
 
 const router = Router();
@@ -14,28 +18,33 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.use(requireAuth);
 router.use(requireTenantUser);
 
-type ConnectionRow = {
+type AnyConnectionRow = {
   id: string;
-  bank_code: 'asaas';
+  company_id: string;
+  bank_code: string;
   environment: 'sandbox' | 'production';
-  api_key_encrypted?: string | null;
-  client_secret_encrypted?: string | null;
+  api_key_encrypted: string | null;
+  client_id_encrypted: string | null;
+  client_secret_encrypted: string | null;
+  certificate_encrypted: string | null;
+  private_key_encrypted: string | null;
 };
 
 type BatchItemRow = {
   id: string;
+  batch_id: string;
   payment_id: string;
   recipient_name: string;
   recipient_document: string;
   pix_key: string;
   amount: number;
   description: string | null;
+  status: string;
 };
 
-function getDecryptedAsaasKey(conn: ConnectionRow): string {
-  if (conn.api_key_encrypted) return decryptSensitiveValue(conn.api_key_encrypted);
-  if (conn.client_secret_encrypted) return decryptSensitiveValue(conn.client_secret_encrypted);
-  throw new ApiError(400, 'API Key da Asaas não encontrada na conexão.');
+function assertValidProvider(p: unknown): BankProvider {
+  if (p === 'asaas' || p === 'inter') return p as BankProvider;
+  throw new ApiError(400, 'Provedor bancário inválido. Conecte Asaas ou Banco Inter.');
 }
 
 async function loadCompanyBatch(companyId: string, batchId: string) {
@@ -56,7 +65,18 @@ async function loadCompanyBatch(companyId: string, batchId: string) {
   };
 }
 
-async function loadAsaasConnection(companyId: string, connectionId: string) {
+async function loadConnectionByRow(row: AnyConnectionRow) {
+  assertValidProvider(row.bank_code);
+  const decoded = decryptConnection(row);
+  if (!decoded) throw new ApiError(400, 'Não foi possível descriptografar a conexão bancária salva. Reconfigure a conexão.');
+  return {
+    provider: decoded.provider as BankProvider,
+    credentials: decoded.credentials,
+    environment: decoded.environment,
+  };
+}
+
+async function loadConnectionById(companyId: string, connectionId: string) {
   const { data, error } = await supabaseAdmin
     .from('bank_connections')
     .select('*')
@@ -64,27 +84,30 @@ async function loadAsaasConnection(companyId: string, connectionId: string) {
     .eq('id', connectionId)
     .maybeSingle();
 
-  if (error) throw new ApiError(500, 'Falha ao carregar conexão Asaas.');
-  if (!data) throw new ApiError(404, 'Conexão Asaas não encontrada para esta empresa.');
-  return data as unknown as ConnectionRow;
+  if (error) throw new ApiError(500, 'Falha ao carregar conexão bancária.');
+  if (!data) throw new ApiError(404, 'Conexão bancária não encontrada para esta empresa.');
+  const typed = data as AnyConnectionRow;
+  return { row: typed, ...(await loadConnectionByRow(typed)) };
 }
 
-async function ensureActiveAsaasForCompany(companyId: string) {
+async function ensureAnyBankConnectionForCompany(companyId: string) {
   const { data, error } = await supabaseAdmin
     .from('bank_connections')
     .select('*')
     .eq('company_id', companyId)
-    .eq('bank_code', 'asaas')
+    .in('bank_code', ['asaas', 'inter'])
+    .order('updated_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
-  if (error) throw new ApiError(500, 'Falha ao verificar conexão Asaas.');
+  if (error) throw new ApiError(500, 'Falha ao verificar conexão bancária.');
   if (!data) {
     throw new ApiError(
       400,
-      'Conecte sua conta Asaas antes de importar planilhas de pagamentos.',
+      'Conecte sua conta Asaas ou Banco Inter antes de importar planilhas de pagamentos.',
     );
   }
-  return data as unknown as ConnectionRow;
+  return data as AnyConnectionRow;
 }
 
 async function updateBatchFinalStatus(batchId: string) {
@@ -144,7 +167,7 @@ router.post(
     const file = req.file;
     if (!file) throw new ApiError(400, 'Envie um arquivo CSV ou XLSX.');
 
-    const connection = await ensureActiveAsaasForCompany(req.currentUser!.companyId);
+    const connection = await ensureAnyBankConnectionForCompany(req.currentUser!.companyId);
     const rows = parseSpreadsheet(file.buffer, file.originalname);
     const { validRows, invalidRows, summary } = validateRows(rows);
 
@@ -215,17 +238,13 @@ router.get(
     const { data, error } = await supabaseAdmin
       .from('batches')
       .select(
-        'id, origin, file_name, status, total_items, total_valid_items, total_invalid_items, total_amount, created_at, confirmed_at, processed_at',
+        'id, origin, file_name, status, total_items, total_valid_items, total_invalid_items, total_amount, created_at, confirmed_at, processed_at, bank_connection_id, company_id, created_by',
       )
       .eq('company_id', req.currentUser!.companyId)
       .order('created_at', { ascending: false });
 
     if (error) throw new ApiError(500, 'Falha ao carregar histórico de lotes.');
-
-    res.json({
-      success: true,
-      batches: data || [],
-    });
+    res.json({ success: true, batches: data || [] });
   }),
 );
 
@@ -281,7 +300,7 @@ router.post(
   '/:id/confirm',
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const batch = await loadCompanyBatch(req.currentUser!.companyId, req.params.id);
-    const connection = await loadAsaasConnection(
+    const { row, provider, credentials } = await loadConnectionById(
       req.currentUser!.companyId,
       batch.bank_connection_id,
     );
@@ -305,40 +324,48 @@ router.post(
       })
       .eq('id', batch.id);
 
-    const normalizedItems = (items as unknown as BatchItemRow[]).map((row) => ({
-      id: row.id,
-      paymentId: row.payment_id,
-      recipientName: row.recipient_name,
-      recipientDocument: row.recipient_document,
+    const queueItems = (items as unknown as BatchItemRow[]).map((row) => ({
+      idempotencyKey: `${row.payment_id}-${row.id}`,
       pixKey: row.pix_key,
-      amount: Number(row.amount),
+      amountCents: Math.round(Number(row.amount) * 100),
       description: row.description || '',
+      beneficiaryName: row.recipient_name,
+      beneficiaryDocument: row.recipient_document,
     }));
 
-    const processed = await executeBatchTransferQueue(
-      {
-        apiKey: getDecryptedAsaasKey(connection),
-        environment: connection.environment,
-      },
-      normalizedItems,
-      {
-        concurrency: 1,
-        delayMs: 120,
-      },
-    );
+    const processed = await executeUnifiedBatchQueue(provider, credentials, queueItems, {
+      concurrency: 1,
+      delayMs: 120,
+    });
 
-    for (const entry of processed) {
-      await saveAttemptAndUpdate(entry.itemId, entry.paymentId, entry.result);
+    // Cada item na fila corresponde ao items[] na mesma ordem. Gravamos.
+    for (let i = 0; i < processed.length; i += 1) {
+      const entry = processed[i];
+      const src = (items as unknown as BatchItemRow[])[i];
+      if (!entry || !src) continue;
+
+      const compat: BatchItemExecutionResult = {
+        status: entry.status,
+        providerPaymentId: entry.provider_payment_id ?? undefined,
+        providerMessage: entry.error_message ?? undefined,
+        providerEndToEndId: (entry as unknown as { end_to_end_id?: string }).end_to_end_id ?? undefined,
+        httpStatus: undefined,
+        providerResponse: null,
+      };
+
+      // eslint-disable-next-line no-await-in-loop
+      await saveAttemptAndUpdate(src.id, src.payment_id, compat);
     }
 
     await updateBatchFinalStatus(batch.id);
 
     res.json({
       success: true,
-      results: processed.map((entry) => ({
-        itemId: entry.itemId,
-        paymentId: entry.paymentId,
-        result: entry.result,
+      provider,
+      results: processed.map((entry, i) => ({
+        itemId: (items as unknown as BatchItemRow[])[i]?.id,
+        paymentId: (items as unknown as BatchItemRow[])[i]?.payment_id,
+        result: entry,
       })),
     });
   }),
@@ -351,7 +378,7 @@ router.post(
     if (!itemId) throw new ApiError(400, 'Informe o item a ser reprocessado.');
 
     const batch = await loadCompanyBatch(req.currentUser!.companyId, req.params.id);
-    const connection = await loadAsaasConnection(
+    const { provider, credentials } = await loadConnectionById(
       req.currentUser!.companyId,
       batch.bank_connection_id,
     );
@@ -364,36 +391,33 @@ router.post(
       .maybeSingle();
 
     if (error || !item) throw new ApiError(404, 'Item do lote não encontrado.');
-
     const row = item as unknown as BatchItemRow;
-    const result = await executeBatchTransferQueue(
-      {
-        apiKey: getDecryptedAsaasKey(connection),
-        environment: connection.environment,
-      },
-      [
-        {
-          id: row.id,
-          paymentId: row.payment_id,
-          recipientName: row.recipient_name,
-          recipientDocument: row.recipient_document,
-          pixKey: row.pix_key,
-          amount: Number(row.amount),
-          description: row.description || '',
-        },
-      ],
-      { concurrency: 1, delayMs: 0 },
-    );
 
-    const first = result[0];
-    if (first) {
-      await saveAttemptAndUpdate(first.itemId, first.paymentId, first.result);
-    }
+    const result = await executeUnifiedPixTransfer(provider, credentials, {
+      idempotencyKey: `${row.payment_id}-${row.id}-retry-${Date.now()}`,
+      pixKey: row.pix_key,
+      amountCents: Math.round(Number(row.amount) * 100),
+      description: row.description || '',
+      beneficiaryName: row.recipient_name,
+      beneficiaryDocument: row.recipient_document,
+    });
+
+    const compat: BatchItemExecutionResult = {
+      status: result.status,
+      providerPaymentId: result.provider_payment_id ?? undefined,
+      providerMessage: result.error_message ?? undefined,
+      providerEndToEndId: (result as unknown as { end_to_end_id?: string }).end_to_end_id ?? undefined,
+      httpStatus: undefined,
+      providerResponse: null,
+    };
+
+    await saveAttemptAndUpdate(row.id, row.payment_id, compat);
     await updateBatchFinalStatus(batch.id);
 
     res.json({
-      success: first?.result.status === 'success',
-      result: first?.result,
+      success: result.status === 'success',
+      provider,
+      result,
     });
   }),
 );
@@ -433,7 +457,7 @@ router.get(
     );
 
     res.header('Content-Type', 'text/csv; charset=utf-8');
-    res.attachment(`lote-asaas-${batch.id}.csv`);
+    res.attachment(`lote-${batch.id}.csv`);
     res.send([header.join(','), ...rows].join('\n'));
   }),
 );

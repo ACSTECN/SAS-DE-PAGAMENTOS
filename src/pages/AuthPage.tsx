@@ -68,7 +68,7 @@ export function AuthPage() {
   const panelSubtitle =
     mode === 'admin'
       ? 'Área operacional: crie clientes, acompanhe repasses e métricas de toda a plataforma.'
-      : 'Conecte a conta Asaas da sua empresa e comece a fazer repasses em lote.';
+      : 'Conecte a conta Asaas ou Banco Inter da sua empresa e comece a fazer repasses em lote.';
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-950 px-6 py-10 text-slate-50">
@@ -85,15 +85,16 @@ export function AuthPage() {
                 : 'Controle seus pagamentos PIX sem planilhas espalhadas.'}
             </h1>
             <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
-              Multiempresa, conexão Asaas individual por cliente, pagamento unitário e em lote,
-              execução segura via API e histórico completo. Cada empresa usa a própria conta Asaas.
+              Multiempresa, conexão Asaas ou Banco Inter individual por cliente, pagamento unitário
+              e em lote, execução segura via API e histórico completo. Cada empresa usa a própria
+              conta bancária.
             </p>
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
             {[
               ['Multiempresa', 'Cada empresa acessa apenas os próprios usuários, lotes e resultados.'],
-              ['Conta própria', 'A execução acontece diretamente na conta Asaas do cliente.'],
+              ['Conta própria', 'A execução acontece diretamente na conta Asaas ou Inter do cliente.'],
               ['Operação rápida', 'PIX unitário, lote, erros por item e nova tentativa manual.'],
             ].map(([title, description]) => (
               <div key={title} className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
