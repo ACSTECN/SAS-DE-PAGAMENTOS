@@ -19,6 +19,20 @@ export const env = {
     productionBaseUrl:
       process.env.ASAAS_PRODUCTION_BASE_URL || 'https://www.asaas.com/api/v3',
   },
+  c6: {
+    sandboxTokenUrl:
+      process.env.C6_SANDBOX_TOKEN_URL ||
+      'https://apix-sandbox.c6bank.com.br/oauth/v2/token',
+    sandboxPixUrl:
+      process.env.C6_SANDBOX_PIX_URL ||
+      'https://apix-sandbox.c6bank.com.br',
+    productionTokenUrl:
+      process.env.C6_PRODUCTION_TOKEN_URL ||
+      'https://apix.c6bank.com.br/oauth/v2/token',
+    productionPixUrl:
+      process.env.C6_PRODUCTION_PIX_URL ||
+      'https://apix.c6bank.com.br',
+  },
   inter: {
     sandboxTokenUrl:
       process.env.INTER_SANDBOX_TOKEN_URL ||

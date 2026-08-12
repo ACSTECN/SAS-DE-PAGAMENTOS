@@ -6,6 +6,11 @@ import { SectionCard } from '@/components/SectionCard';
 
 const PROVIDERS: Array<{ value: BankProvider; label: string; hint: string }> = [
   {
+    value: 'c6',
+    label: 'C6 Bank',
+    hint: 'Principal opção. OAuth2 + mTLS com certificado PEM. Ideal para empresas PJ.',
+  },
+  {
     value: 'asaas',
     label: 'Asaas',
     hint: 'Conta digital com API Key direta. Ideal para pequenas e médias empresas.',
@@ -23,8 +28,8 @@ type AsaasForm = {
   apiKey: string;
 };
 
-type InterForm = {
-  provider: 'inter';
+type MtlsForm = {
+  provider: 'c6' | 'inter';
   environment: 'sandbox' | 'production';
   clientId: string;
   clientSecret: string;
@@ -32,7 +37,7 @@ type InterForm = {
   privateKeyPem: string;
 };
 
-type BankForm = AsaasForm | InterForm;
+type BankForm = AsaasForm | MtlsForm;
 
 const initialAsaas: AsaasForm = {
   provider: 'asaas',
@@ -40,14 +45,16 @@ const initialAsaas: AsaasForm = {
   apiKey: '',
 };
 
-const initialInter: InterForm = {
-  provider: 'inter',
-  environment: 'sandbox',
-  clientId: '',
-  clientSecret: '',
-  certificatePem: '',
-  privateKeyPem: '',
-};
+function makeInitialMtls(provider: 'c6' | 'inter'): MtlsForm {
+  return {
+    provider,
+    environment: 'sandbox',
+    clientId: '',
+    clientSecret: '',
+    certificatePem: '',
+    privateKeyPem: '',
+  };
+}
 
 function formatLastTestedAt(lastTestedAt?: string) {
   if (!lastTestedAt) return '-';
@@ -59,12 +66,13 @@ function formatLastTestedAt(lastTestedAt?: string) {
 }
 
 function getProviderDisplay(provider: BankProvider) {
+  if (provider === 'c6') return 'C6 Bank';
   if (provider === 'asaas') return 'Asaas';
   return 'Banco Inter';
 }
 
 export function BankConnectionPage() {
-  const [form, setForm] = useState<BankForm>(initialAsaas);
+  const [form, setForm] = useState<BankForm>(makeInitialMtls('c6'));
   const [connection, setConnection] = useState<BankConnection | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,10 +88,10 @@ export function BankConnectionPage() {
     setConnection(response.connection);
     if (response.connection) {
       const env = response.connection.environment;
-      if (response.connection.provider === 'inter') {
-        setForm({ ...initialInter, environment: env });
-      } else {
+      if (response.connection.provider === 'asaas') {
         setForm({ ...initialAsaas, environment: env });
+      } else {
+        setForm({ ...makeInitialMtls(response.connection.provider as 'c6' | 'inter'), environment: env });
       }
     }
   }
@@ -95,10 +103,10 @@ export function BankConnectionPage() {
   function switchProvider(provider: BankProvider) {
     setError(null);
     setFeedback(null);
-    if (provider === 'inter') {
-      setForm({ ...initialInter, environment: form.environment });
-    } else {
+    if (provider === 'asaas') {
       setForm({ ...initialAsaas, environment: form.environment });
+    } else {
+      setForm({ ...makeInitialMtls(provider), environment: form.environment });
     }
   }
 
@@ -153,7 +161,7 @@ export function BankConnectionPage() {
       const response = await api.delete<{ message: string }>('/api/bank-connections');
       setFeedback(response.message);
       setConnection(null);
-      setForm(initialAsaas);
+      setForm(makeInitialMtls('c6'));
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Falha ao remover conexão.');
     } finally {
@@ -161,11 +169,14 @@ export function BankConnectionPage() {
     }
   }
 
+  const isMtls = form.provider !== 'asaas';
+  const providerName = getProviderDisplay(form.provider);
+
   return (
     <div className="space-y-8">
       <SectionCard
         title="Conectar banco"
-        subtitle="Escolha entre Asaas ou Banco Inter. Cada empresa usa a sua própria credencial, garantindo total isolamento."
+        subtitle="C6 Bank é a opção principal. Escolha abaixo Asaas ou Banco Inter como alternativa. Cada empresa usa a sua própria credencial."
         action={
           connection ? (
             <div className="flex gap-2">
@@ -249,22 +260,28 @@ export function BankConnectionPage() {
 
         <form className="grid gap-4" onSubmit={handleSave}>
           <div className="rounded-3xl border border-white/10 bg-slate-950/60 p-5">
-            <div className="mb-3 text-sm text-slate-300">Escolha o banco</div>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="mb-3 text-sm text-slate-300">Escolha o banco (C6 Bank = principal)</div>
+            <div className="grid gap-3 md:grid-cols-3">
               {PROVIDERS.map((provider) => {
                 const selected = form.provider === provider.value;
+                const isPrincipal = provider.value === 'c6';
                 return (
                   <button
                     type="button"
                     key={provider.value}
                     onClick={() => switchProvider(provider.value)}
-                    className={`rounded-2xl border px-5 py-4 text-left transition ${
+                    className={`relative rounded-2xl border px-5 py-4 text-left transition ${
                       selected
                         ? 'border-cyan-400/50 bg-cyan-400/10'
                         : 'border-white/10 bg-slate-950/70 hover:border-white/20'
                     }`}
                   >
-                    <div className="flex items-center justify-between">
+                    {isPrincipal ? (
+                      <div className="absolute right-3 top-3 rounded-full bg-cyan-400/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-cyan-200">
+                        Principal
+                      </div>
+                    ) : null}
+                    <div className="flex items-center justify-between pr-12">
                       <div className="text-lg font-semibold text-white">{provider.label}</div>
                       {selected ? (
                         <CheckCircle2 className="text-cyan-300" size={18} />
@@ -302,9 +319,8 @@ export function BankConnectionPage() {
               </div>
             ) : (
               <div className="rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-400">
-                Acesse o Portal de Desenvolvedores Inter: Minha Conta &gt; Aplicações.
-                Copie Client ID, Client Secret e cole o certificado PEM + chave privada PEM do
-                ambiente selecionado.
+                No {providerName} PJ: Meu perfil &gt; Integrações via API &gt; Nova chave. Copie
+                Client ID, Client Secret e cole o certificado PEM + chave privada PEM baixados.
               </div>
             )}
 
@@ -327,17 +343,17 @@ export function BankConnectionPage() {
               </label>
             ) : null}
 
-            {form.provider === 'inter' ? (
+            {isMtls ? (
               <>
                 <label className="block">
-                  <span className="mb-2 block text-sm text-slate-300">Client ID</span>
+                  <span className="mb-2 block text-sm text-slate-300">Client ID ({providerName})</span>
                   <input
                     type="text"
                     value={form.clientId}
-                    placeholder="Ex: 6a8f4...-inter-client-id"
+                    placeholder={`Ex: 6a8f4...-${providerName.toLowerCase()}-client-id`}
                     onChange={(event) =>
                       setForm((current) => ({
-                        ...(current as InterForm),
+                        ...(current as MtlsForm),
                         clientId: event.target.value,
                       }))
                     }
@@ -346,14 +362,14 @@ export function BankConnectionPage() {
                   />
                 </label>
                 <label className="block">
-                  <span className="mb-2 block text-sm text-slate-300">Client Secret</span>
+                  <span className="mb-2 block text-sm text-slate-300">Client Secret ({providerName})</span>
                   <input
                     type="password"
                     value={form.clientSecret}
                     placeholder="••••••••••••••••"
                     onChange={(event) =>
                       setForm((current) => ({
-                        ...(current as InterForm),
+                        ...(current as MtlsForm),
                         clientSecret: event.target.value,
                       }))
                     }
@@ -371,7 +387,7 @@ export function BankConnectionPage() {
                     placeholder="-----BEGIN CERTIFICATE-----&#10;...conteúdo do certificado...&#10;-----END CERTIFICATE-----"
                     onChange={(event) =>
                       setForm((current) => ({
-                        ...(current as InterForm),
+                        ...(current as MtlsForm),
                         certificatePem: event.target.value,
                       }))
                     }
@@ -389,7 +405,7 @@ export function BankConnectionPage() {
                     placeholder="-----BEGIN PRIVATE KEY-----&#10;...conteúdo da chave privada...&#10;-----END PRIVATE KEY-----"
                     onChange={(event) =>
                       setForm((current) => ({
-                        ...(current as InterForm),
+                        ...(current as MtlsForm),
                         privateKeyPem: event.target.value,
                       }))
                     }
@@ -405,8 +421,7 @@ export function BankConnectionPage() {
             <div>
               <div className="text-sm text-slate-300">Validação automática ao salvar</div>
               <div className="mt-2 text-lg font-medium text-white">
-                O botão conecta e já realiza um ping de validação na conta{' '}
-                {getProviderDisplay(form.provider)} da empresa.
+                O botão conecta e já realiza um ping de validação na conta {providerName} da empresa.
               </div>
             </div>
 
@@ -414,9 +429,7 @@ export function BankConnectionPage() {
               disabled={loading}
               className="rounded-2xl bg-cyan-400 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-300 disabled:opacity-60"
             >
-              {loading
-                ? `Conectando ${getProviderDisplay(form.provider)}...`
-                : `Conectar ${getProviderDisplay(form.provider)}`}
+              {loading ? `Conectando ${providerName}...` : `Conectar ${providerName}`}
             </button>
           </div>
         </form>

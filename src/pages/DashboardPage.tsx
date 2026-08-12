@@ -13,6 +13,7 @@ const nextSteps: Array<[string, string, string]> = [
 ];
 
 function getProviderDisplay(provider: BankProvider) {
+  if (provider === 'c6') return 'C6 Bank';
   if (provider === 'asaas') return 'Asaas';
   return 'Banco Inter';
 }
@@ -56,7 +57,7 @@ export function DashboardPage() {
           hint={
             connection
               ? `Ambiente: ${connection.environment === 'production' ? 'Produção' : 'Sandbox'}`
-              : `Conecte a conta ${connection ? getProviderDisplay(connection.provider) : 'Asaas ou Inter'} da empresa para começar.`
+              : `Conecte a conta C6 Bank (principal), Asaas ou Banco Inter da empresa para começar.`
           }
         />
         <MetricCard
@@ -109,7 +110,7 @@ export function DashboardPage() {
               <div className="mt-3 text-xl font-semibold text-white">
                 {connection?.status === 'validated'
                   ? `A conta ${getProviderDisplay(connection.provider)} está pronta para pagamento.`
-                  : 'Conecte a API Key Asaas ou as credenciais Banco Inter desta empresa.'}
+                  : 'Conecte a conta C6 Bank (principal), ou use Asaas / Banco Inter como alternativa.'}
               </div>
             </div>
 
@@ -158,7 +159,7 @@ export function DashboardPage() {
               {!batches.length ? (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
-                    Nenhum lote encontrado. Conecte a conta bancária e crie o primeiro upload.
+                    Nenhum lote encontrado. Conecte a conta C6 Bank e crie o primeiro upload.
                   </td>
                 </tr>
               ) : null}

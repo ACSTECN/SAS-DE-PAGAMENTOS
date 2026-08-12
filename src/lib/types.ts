@@ -29,7 +29,7 @@ export type AppSession = {
   expiresAt?: number;
 };
 
-export type BankProvider = 'asaas' | 'inter';
+export type BankProvider = 'asaas' | 'inter' | 'c6';
 
 export type BankConnection = {
   id: string;

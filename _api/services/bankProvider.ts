@@ -14,6 +14,14 @@ import {
   type InterConnectionCredentials,
   type InterEnvironment,
 } from './inter.js';
+import {
+  validateC6Connection,
+  executeC6PixTransfer,
+  executeC6BatchTransferQueue,
+  resolveC6Urls,
+  type C6ConnectionCredentials,
+  type C6Environment,
+} from './c6.js';
 import { decryptSensitiveValue, encryptSensitiveValue } from '../lib/crypto.js';
 
 export type TransferResultItem = {
@@ -27,7 +35,7 @@ export type TransferResultItem = {
   raw?: unknown;
 };
 
-export type BankProvider = 'asaas' | 'inter';
+export type BankProvider = 'c6' | 'asaas' | 'inter';
 
 export interface UnifiedTestResult {
   valid: boolean;
@@ -46,18 +54,13 @@ export interface BaseExecuteSingleArgs {
 export interface UnifiedConnectionPayload {
   bank_code: BankProvider;
   environment: 'sandbox' | 'production';
-  // Asaas
   api_key_plain?: string | null;
-  // Inter
   client_id_plain?: string | null;
   client_secret_plain?: string | null;
   certificate_pem_plain?: string | null;
   private_key_pem_plain?: string | null;
 }
 
-/**
- * Cria a conexão criptografada no formato da tabela bank_connections, dependendo do provider.
- */
 export function encryptConnectionForInsert(payload: UnifiedConnectionPayload) {
   const base = {
     bank_code: payload.bank_code,
@@ -86,9 +89,6 @@ export function encryptConnectionForInsert(payload: UnifiedConnectionPayload) {
   };
 }
 
-/**
- * Extrai e descriptografa as credenciais de uma conexão bancária do banco de dados.
- */
 export function decryptConnection(conn: {
   bank_code: string;
   api_key_encrypted: string | null;
@@ -98,6 +98,7 @@ export function decryptConnection(conn: {
   private_key_encrypted: string | null;
   environment: string | null;
 }):
+  | { provider: 'c6'; credentials: C6ConnectionCredentials; environment: C6Environment }
   | { provider: 'asaas'; credentials: AsaasConnectionCredentials; environment: AsaasEnvironment }
   | { provider: 'inter'; credentials: InterConnectionCredentials; environment: InterEnvironment }
   | null {
@@ -138,21 +139,37 @@ export function decryptConnection(conn: {
     };
   }
 
+  if (provider === 'c6') {
+    const clientId = decryptSensitiveValue(conn.client_id_encrypted || '');
+    const clientSecret = decryptSensitiveValue(conn.client_secret_encrypted || '');
+    const cert = decryptSensitiveValue(conn.certificate_encrypted || '');
+    const priv = decryptSensitiveValue(conn.private_key_encrypted || '');
+    if (!clientId || clientId === 'na' || !clientSecret || clientSecret === 'na') return null;
+    if (!cert || cert === 'na' || !priv || priv === 'na') return null;
+    return {
+      provider: 'c6',
+      environment: env as C6Environment,
+      credentials: {
+        clientId,
+        clientSecret,
+        certificatePem: cert,
+        privateKeyPem: priv,
+        environment: env as C6Environment,
+      },
+    };
+  }
+
   return null;
 }
 
-/**
- * Valida a conexão de qualquer provider (ping real na API).
- */
 export async function validateConnectionUnified(
   provider: BankProvider,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   creds: any,
   env: 'sandbox' | 'production',
 ): Promise<UnifiedTestResult> {
-  if (provider === 'asaas') {
-    return validateAsaasConnection(creds as AsaasConnectionCredentials, env as AsaasEnvironment);
-  }
+  if (provider === 'c6') return validateC6Connection(creds as C6ConnectionCredentials);
+  if (provider === 'asaas') return validateAsaasConnection(creds as AsaasConnectionCredentials, env as AsaasEnvironment);
   return validateInterConnection(creds as InterConnectionCredentials);
 }
 
@@ -162,9 +179,8 @@ export async function executeUnifiedPixTransfer(
   creds: any,
   args: BaseExecuteSingleArgs,
 ): Promise<TransferResultItem> {
-  if (provider === 'asaas') {
-    return executeAsaasPixTransfer(creds as AsaasConnectionCredentials, args);
-  }
+  if (provider === 'c6') return executeC6PixTransfer(creds as C6ConnectionCredentials, args);
+  if (provider === 'asaas') return executeAsaasPixTransfer(creds as AsaasConnectionCredentials, args);
   return executeInterPixTransfer(creds as InterConnectionCredentials, args);
 }
 
@@ -175,19 +191,20 @@ export async function executeUnifiedBatchQueue(
   items: BaseExecuteSingleArgs[],
   opts?: { concurrency?: number; delayMs?: number; onProgress?: (done: number, total: number, result: TransferResultItem) => void },
 ): Promise<TransferResultItem[]> {
-  if (provider === 'asaas') {
-    return executeAsaasQueue(creds as AsaasConnectionCredentials, items, opts);
-  }
+  if (provider === 'c6') return executeC6BatchTransferQueue(creds as C6ConnectionCredentials, items, opts);
+  if (provider === 'asaas') return executeAsaasQueue(creds as AsaasConnectionCredentials, items, opts);
   return executeInterBatchTransferQueue(creds as InterConnectionCredentials, items, opts);
 }
 
 export function getProviderDisplay(provider: BankProvider | string | null | undefined) {
+  if (provider === 'c6') return 'C6 Bank';
   if (provider === 'asaas') return 'Asaas Conta Digital';
   if (provider === 'inter') return 'Banco Inter Empresas';
   return 'Provedor bancário';
 }
 
 export function getProviderBaseUrlsForUi(provider: BankProvider | string, env: 'sandbox' | 'production') {
+  if (provider === 'c6') return resolveC6Urls(env as C6Environment);
   if (provider === 'asaas') return { base: getAsaasBaseUrl(env as AsaasEnvironment) };
   if (provider === 'inter') return resolveInterUrls(env as InterEnvironment);
   return { base: '' };

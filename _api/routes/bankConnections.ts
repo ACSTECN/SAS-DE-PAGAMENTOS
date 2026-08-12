@@ -37,8 +37,8 @@ function toEnvironmentLabel(environment: 'sandbox' | 'production') {
 }
 
 function assertValidProvider(p: unknown): BankProvider {
-  if (p === 'asaas' || p === 'inter') return p as BankProvider;
-  throw new ApiError(400, 'Provedor bancário inválido. Selecione Asaas ou Banco Inter.');
+  if (p === 'c6' || p === 'asaas' || p === 'inter') return p as BankProvider;
+  throw new ApiError(400, 'Provedor bancário inválido. Selecione C6 Bank, Asaas ou Banco Inter.');
 }
 
 async function loadAnyConnection(companyId: string, provider?: BankProvider | null): Promise<ConnectionRow | null> {
@@ -132,8 +132,7 @@ router.post(
       if (!apiKey || typeof apiKey !== 'string' || apiKey.trim().length < 10) {
         throw new ApiError(400, 'Informe uma API Key válida do Asaas.');
       }
-    } else {
-      // Banco Inter: clientId, clientSecret, certificate, privateKey obrigatórios.
+    } else if (selectedProvider === 'inter') {
       if (!clientId || typeof clientId !== 'string' || clientId.trim().length < 4) {
         throw new ApiError(400, 'Informe o Client ID (Banco Inter).');
       }
@@ -145,6 +144,19 @@ router.post(
       }
       if (!privateKeyPem || typeof privateKeyPem !== 'string' || !privateKeyPem.includes('PRIVATE KEY')) {
         throw new ApiError(400, 'Informe a chave privada PEM completa da conta Banco Inter (inclui BEGIN PRIVATE KEY).');
+      }
+    } else {
+      if (!clientId || typeof clientId !== 'string' || clientId.trim().length < 4) {
+        throw new ApiError(400, 'Informe o Client ID (C6 Bank).');
+      }
+      if (!clientSecret || typeof clientSecret !== 'string' || clientSecret.trim().length < 8) {
+        throw new ApiError(400, 'Informe o Client Secret (C6 Bank).');
+      }
+      if (!certificatePem || typeof certificatePem !== 'string' || !certificatePem.includes('CERTIFICATE')) {
+        throw new ApiError(400, 'Informe o certificado PEM completo da conta C6 Bank (inclui BEGIN CERTIFICATE).');
+      }
+      if (!privateKeyPem || typeof privateKeyPem !== 'string' || !privateKeyPem.includes('PRIVATE KEY')) {
+        throw new ApiError(400, 'Informe a chave privada PEM completa da conta C6 Bank (inclui BEGIN PRIVATE KEY).');
       }
     }
 
